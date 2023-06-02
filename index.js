@@ -4,7 +4,8 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const port = process.env.PORT || 5000;
 
-require('dotenv').config()
+require('dotenv').config();
+const stripe = require('stripe')(process.env.PAYMENT_SECRET_KEY)
 app.use(cors());
 app.use(express.json())
 
@@ -48,6 +49,7 @@ async function run() {
     const menuCollection = client.db('bistroBoss').collection('menu')
     const reviewsCollection = client.db('bistroBoss').collection('reviews')
     const cartCollection = client.db('bistroBoss').collection('carts')
+    const paymentCollection = client.db('bistroBoss').collection('payment')
 
     // Warning: use verifyJWT before using verifyAdmin
     const verifyAdmin = async (req, res, next) => {
@@ -165,6 +167,31 @@ async function run() {
       const result = await cartCollection.deleteOne(query);
       res.send(result)
     })
+
+    // create payment intent
+    app.post('/create-payment-intent', verifyJWT, async(req,res) => {
+      const {price} = req.body;
+      const amount = price * 100;
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount, 
+        currency: "usd",
+        payment_method_types: ['card']
+      })
+      res.send({
+        clientSecret: paymentIntent.client_secret
+      })
+    })
+
+    // payment related API
+    app.post('/payments', verifyJWT, async(req, res) => {
+      const payment = req.body;
+      const insertResult = await paymentCollection.insertOne(payment);
+      
+      const query = {_id: { $in: payment.cardItems.map(id => new ObjectId(id))}}
+      const deleteResult = await cartCollection.deleteMany(query)
+      res.send({insertResult, deleteResult})
+    })
+
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
