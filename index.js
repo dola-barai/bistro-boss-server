@@ -171,7 +171,7 @@ async function run() {
     // create payment intent
     app.post('/create-payment-intent', verifyJWT, async(req,res) => {
       const {price} = req.body;
-      const amount = price * 100;
+      const amount = parseInt(price * 100);
       const paymentIntent = await stripe.paymentIntents.create({
         amount: amount, 
         currency: "usd",
@@ -190,6 +190,56 @@ async function run() {
       const query = {_id: { $in: payment.cardItems.map(id => new ObjectId(id))}}
       const deleteResult = await cartCollection.deleteMany(query)
       res.send({insertResult, deleteResult})
+    })
+
+    app.get('/admin-stats', verifyJWT, verifyAdmin,  async(req, res) => {
+      const users = await userCollection.estimatedDocumentCount();
+      const products = await menuCollection.estimatedDocumentCount();
+      const orders = await  paymentCollection.estimatedDocumentCount()
+      
+      // best way to get sum of price field is to use group and sum operator
+      const payments = await paymentCollection.find().toArray();
+      const revenue = payments.reduce((sum, payment) => sum + payment.price,0)
+
+      res.send({
+        revenue,
+        users,
+        products,
+        orders
+      })
+    })
+
+    app.get('/order-stats', verifyJWT, verifyAdmin, async(req, res) => {
+      const pipeline = [
+        {
+          $lookup: {
+            from: 'menu',
+            localField: 'menuItems',
+            foreignField: '_id',
+            as: 'menuItemsData'
+          }
+        },
+        {
+          $unwind:'$menuItemsData'
+        },
+        {
+          $group: {
+            _id: '$menuItemsData.category',
+            count: {$sum: 1},
+            totalPrice: { $sum:'$menuItemsData.price'}
+          }
+        },
+        {
+          $project: {
+            category: '$_id',
+            count: 1,
+            total: { $round: ['$totalPrice', 2]},
+            _id: 0
+          }
+        }
+      ];
+      const result = await paymentCollection.aggregate(pipeline).toArray()
+      res.send(result)
     })
 
 
